@@ -1,0 +1,63 @@
+---
+- name: Deploy Static Website with Rollback and Vault Integration
+  hosts: webservers
+  become: yes
+
+  vars_files:
+    - vault.yml    # <-- Encrypted variables file
+
+  tasks:
+
+    - name: Install nginx
+      yum:
+        name: nginx
+        state: present
+
+    - name: Create backup of existing index.html if exists
+      shell: cp /var/www/html/index.html /var/www/html/index.html.bak
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - block:
+
+        - name: Deploy custom index.html
+          copy:
+            src: files/index.html
+            dest: /var/www/html/index.html
+            owner: root
+            group: root
+            mode: '0644'
+          notify: Restart nginx
+
+        - name: Deploy nginx configuration
+          template:
+            src: templates/nginx.conf.j2
+            dest: /etc/nginx/nginx.conf
+          notify: Restart nginx
+
+      rescue:
+
+        - name: Rollback - Restore old index.html
+          copy:
+            src: /var/www/html/index.html.bak
+            dest: /var/www/html/index.html
+            remote_src: yes
+
+      always:
+
+        - name: Notify Deployment Finished
+          debug:
+            msg: "Deployment process completed for {{ site_admin }}."
+
+    - name: Start and enable nginx
+      service:
+        name: nginx
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart nginx
+      service:
+        name: nginx
+        state: restarted
